@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>캐리어 보관 시스템</title>
+<style>
+  :root{
+    --bg:#14171c; --surface:#1c2129; --surface-2:#242b35;
+    --accent:#c9974a; --accent-soft:#8a6a38; --ok:#4fa98c;
+    --text:#eef1f4; --text-dim:#93a0ad; --border:#2f3742;
+    font-family:-apple-system,'Apple SD Gothic Neo','Malgun Gothic','Pretendard',sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);min-height:100vh;padding:36px 20px 60px;}
+  .wrap{max-width:560px;margin:0 auto;}
+  header{text-align:center;margin-bottom:30px;}
+  header .icon{font-size:38px;margin-bottom:8px;}
+  header h1{font-size:21px;font-weight:800;margin:0 0 6px;letter-spacing:-.02em;}
+  header p{font-size:13px;color:var(--text-dim);margin:0;line-height:1.55;}
+
+  a.card{
+    display:flex;align-items:center;gap:14px;text-decoration:none;color:inherit;
+    background:var(--surface);border:1px solid var(--border);border-radius:16px;
+    padding:18px 20px;margin-bottom:12px;
+  }
+  a.card:hover{border-color:var(--accent-soft);}
+  a.card .emoji{font-size:26px;flex-shrink:0;}
+  a.card .txt{flex:1;min-width:0;}
+  a.card .name{font-size:16px;font-weight:800;margin-bottom:3px;}
+  a.card .desc{font-size:12.5px;color:var(--text-dim);line-height:1.5;}
+  a.card .arrow{color:var(--text-dim);font-size:18px;flex-shrink:0;}
+  .staff-tag{display:inline-block;background:var(--accent);color:#1b1204;font-size:10.5px;font-weight:800;padding:2px 7px;border-radius:20px;margin-left:6px;vertical-align:middle;}
+
+  h2.section{font-size:14px;font-weight:800;color:var(--text-dim);margin:30px 0 12px;}
+  .qr-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  .qr-box{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:18px 14px;text-align:center;}
+  .qr-box .qr{background:#fff;padding:10px;border-radius:10px;display:inline-block;line-height:0;}
+  .qr-box .qr img,.qr-box .qr canvas{display:block;}
+  .qr-box .label{font-size:13px;font-weight:800;margin-top:12px;}
+  .qr-box .sub{font-size:11.5px;color:var(--text-dim);margin-top:4px;line-height:1.5;word-break:break-all;}
+  .note{font-size:12px;color:var(--text-dim);line-height:1.7;margin-top:26px;padding:16px;background:var(--surface-2);border:1px solid var(--border);border-radius:12px;}
+  .note b{color:var(--text);}
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="icon">🧳</div>
+    <h1>캐리어 보관 시스템</h1>
+    <p>모든 기기가 같은 데이터를 실시간으로 공유합니다.</p>
+  </header>
+
+  <a class="card" href="./manage.html">
+    <span class="emoji">🗂️</span>
+    <span class="txt">
+      <span class="name">보관 관리<span class="staff-tag">직원</span></span>
+      <span class="desc">접수 · 보관중 목록 · 수령 완료 · 매출 · 요금 설정</span>
+    </span>
+    <span class="arrow">›</span>
+  </a>
+
+  <a class="card" href="./checkin.html">
+    <span class="emoji">📝</span>
+    <span class="txt">
+      <span class="name">현장접수</span>
+      <span class="desc">손님이 직접 입력하고 번호표를 받는 화면 (4개 국어)</span>
+    </span>
+    <span class="arrow">›</span>
+  </a>
+
+  <a class="card" href="./reserve.html">
+    <span class="emoji">📅</span>
+    <span class="txt">
+      <span class="name">사전 예약</span>
+      <span class="desc">방문 전에 미리 예약받는 화면 (4개 국어)</span>
+    </span>
+    <span class="arrow">›</span>
+  </a>
+
+  <h2 class="section">손님 안내용 QR</h2>
+  <div class="qr-grid">
+    <div class="qr-box">
+      <div class="qr" id="qrCheckin"></div>
+      <div class="label">현장접수</div>
+      <div class="sub" id="urlCheckin"></div>
+    </div>
+    <div class="qr-box">
+      <div class="qr" id="qrReserve"></div>
+      <div class="label">사전 예약</div>
+      <div class="sub" id="urlReserve"></div>
+    </div>
+  </div>
+
+  <div class="note">
+    <b>이 페이지는 인쇄해서 카운터에 두셔도 됩니다.</b><br>
+    QR을 찍으면 손님 폰에서 바로 해당 화면이 열립니다.
+    현장접수·예약 화면은 <b>새 접수를 넣기만</b> 할 수 있고, 다른 손님의 이름·연락처는 볼 수 없습니다.
+    보관 관리 화면은 직원 계정으로 로그인해야 열립니다.
+  </div>
+</div>
+
+<script>
+(function(){
+  var base=location.href.replace(/\/[^\/]*$/, '/');
+  var targets=[
+    { id:'qrCheckin', urlId:'urlCheckin', url:base+'checkin.html' },
+    { id:'qrReserve', urlId:'urlReserve', url:base+'reserve.html' }
+  ];
+  targets.forEach(function(t){
+    document.getElementById(t.urlId).textContent=t.url;
+    try{
+      new QRCode(document.getElementById(t.id), {
+        text:t.url, width:150, height:150,
+        colorDark:'#14171c', colorLight:'#ffffff',
+        correctLevel:QRCode.CorrectLevel.M
+      });
+    }catch(e){
+      document.getElementById(t.id).textContent='QR 생성 실패';
+    }
+  });
+})();
+</script>
+</body>
+</html>
