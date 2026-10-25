@@ -113,6 +113,18 @@
   .hist-row .meta{color:var(--text-dim);font-size:12px;margin-top:3px;}
   .danger-btn{background:transparent;border:1px solid var(--danger);color:var(--danger);padding:8px 14px;border-radius:8px;font-family:inherit;font-weight:700;font-size:13px;cursor:pointer;}
 
+  /* 엑셀 다운로드 */
+  .export-block{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;margin-bottom:18px;}
+  .export-block h2{font-size:14px;margin:0 0 10px;font-weight:800;}
+  .export-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+  .export-row input[type=date]{flex:1;min-width:130px;width:auto;}
+  .export-row .tilde{color:var(--text-dim);font-weight:700;}
+  .export-btn{
+    background:var(--ok);color:#0e2019;border:none;padding:10px 16px;border-radius:9px;
+    font-family:inherit;font-weight:800;font-size:13.5px;cursor:pointer;white-space:nowrap;
+  }
+  .export-btn:disabled{opacity:.5;cursor:not-allowed;}
+
   /* 설정 */
   .tier-table{width:100%;border-collapse:collapse;margin-bottom:12px;font-size:13.5px;}
   .tier-table th,.tier-table td{padding:8px 6px;border-bottom:1px solid var(--border);text-align:center;}
@@ -179,6 +191,8 @@
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 <script src="./store.js"></script>
+<!-- 엑셀(.xlsx) 파일 생성용 라이브러리 -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
 
@@ -271,6 +285,16 @@
       <div class="stat-cards">
         <div class="stat-card"><div class="label">선택 날짜 매출</div><div class="value" id="dayTotal">0원</div></div>
         <div class="stat-card"><div class="label">전체 누적 매출</div><div class="value" id="allTotal">0원</div></div>
+      </div>
+      <div class="export-block">
+        <h2>📥 엑셀로 내려받기</h2>
+        <div class="export-row">
+          <input type="date" id="exportFrom">
+          <span class="tilde">~</span>
+          <input type="date" id="exportTo">
+          <button class="export-btn" id="exportBtn">엑셀 다운로드</button>
+        </div>
+        <div class="hint">기간 안의 완료 기록을 한 파일로 만듭니다. 시트 1: 건별 완료 내역 · 시트 2: 날짜별 매출 합계. 하루만 받으려면 두 날짜를 같게 두세요.</div>
       </div>
       <div id="histList"></div>
     </section>
@@ -699,6 +723,132 @@ document.getElementById('clearHistDay').addEventListener('click', async ()=>{
     alert('삭제에 실패했습니다: '+(e.message||e));
   }finally{
     btn.disabled=false; btn.textContent='선택 날짜 기록 삭제';
+  }
+});
+
+/* ------------------------------------------------------- 엑셀 다운로드 */
+const exportFromInput=document.getElementById('exportFrom');
+const exportToInput=document.getElementById('exportTo');
+exportFromInput.value=histDateInput.value;
+exportToInput.value=histDateInput.value;
+// 위에서 날짜를 바꾸면 내려받기 기간도 그 날짜로 맞춰줍니다.
+histDateInput.addEventListener('change', ()=>{
+  exportFromInput.value=histDateInput.value;
+  exportToInput.value=histDateInput.value;
+});
+
+const EXPORT_SOURCE_LABEL={ manage:'직원접수', checkin:'현장접수', reserve:'예약', legacy:'이전 기록' };
+const WEEKDAYS=['일','월','화','수','목','금','토'];
+
+function ymd(d){
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function datesBetween(from, to){
+  const out=[];
+  const d=new Date(from+'T00:00:00');
+  const end=new Date(to+'T00:00:00');
+  while(d<=end){ out.push(ymd(d)); d.setDate(d.getDate()+1); }
+  return out;
+}
+function fmtDateTime(iso){
+  if(!iso) return '';
+  const d=new Date(iso);
+  if(isNaN(d)) return '';
+  return ymd(d)+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+}
+// 지정한 열(0부터)에 숫자 서식(1,234)을 입힙니다.
+function applyNumberFormat(ws, cols){
+  const range=XLSX.utils.decode_range(ws['!ref']);
+  for(let r=1;r<=range.e.r;r++){
+    cols.forEach(c=>{
+      const cell=ws[XLSX.utils.encode_cell({r, c})];
+      if(cell && typeof cell.v==='number') cell.z='#,##0';
+    });
+  }
+}
+
+document.getElementById('exportBtn').addEventListener('click', async ()=>{
+  if(typeof XLSX==='undefined'){
+    alert('엑셀 기능을 불러오지 못했습니다. 인터넷 연결을 확인하고 새로고침해주세요.');
+    return;
+  }
+  const from=exportFromInput.value, to=exportToInput.value;
+  if(!from || !to){ alert('기간을 선택해주세요.'); return; }
+  if(from>to){ alert('시작 날짜가 끝 날짜보다 늦습니다.'); return; }
+  const days=datesBetween(from, to);
+  if(days.length>366){ alert('한 번에 최대 1년까지 내려받을 수 있습니다.'); return; }
+
+  const btn=document.getElementById('exportBtn');
+  btn.disabled=true; btn.textContent='만드는 중…';
+  try{
+    // 날짜별로 완료 기록을 불러옵니다 (10일씩 묶어서 요청)
+    const byDay=[];
+    for(let i=0;i<days.length;i+=10){
+      const chunk=days.slice(i,i+10);
+      const lists=await Promise.all(chunk.map(d=>Store.listCompletedByDate(d)));
+      chunk.forEach((d,j)=>byDay.push({ date:d, list:(lists[j]||[]).slice().sort((a,b)=>(a.seq||0)-(b.seq||0)) }));
+    }
+    const totalCount=byDay.reduce((s,x)=>s+x.list.length,0);
+    if(!totalCount){ alert('선택한 기간에 완료 기록이 없습니다.'); return; }
+
+    // 시트 1: 건별 완료 내역
+    const detail=[[
+      '날짜','요일','접수번호','이름','연락처','접수 경로','이용권',
+      '캐리어(개)','기타 짐(개)','번호표','맡긴 시각','찾은 시각','보관 시간(분)','요금(원)'
+    ]];
+    let sumC=0, sumO=0, sumP=0;
+    byDay.forEach(({date, list})=>{
+      const wd=WEEKDAYS[new Date(date+'T00:00:00').getDay()];
+      list.forEach(t=>{
+        const tags=[tagRangeLabel('C', t.carrierTags), tagRangeLabel('E', t.otherTags)].filter(Boolean).join(' / ');
+        const c=t.carrierCount||0, o=t.otherCount||0, p=t.price||0;
+        sumC+=c; sumO+=o; sumP+=p;
+        detail.push([
+          date, wd, t.seq ?? '', t.name||'', t.phone||'',
+          EXPORT_SOURCE_LABEL[t.source] || t.source || '',
+          t.duration==='5h'?'5시간권':'1일권',
+          c, o, tags, fmtDateTime(t.checkedInAt), fmtDateTime(t.completedAt),
+          t.elapsedMinutes ?? '', p
+        ]);
+      });
+    });
+    detail.push([]);
+    detail.push(['합계','',totalCount+'건','','','','',sumC,sumO,'','','','',sumP]);
+    const ws1=XLSX.utils.aoa_to_sheet(detail);
+    ws1['!cols']=[{wch:11},{wch:5},{wch:9},{wch:10},{wch:14},{wch:10},{wch:8},{wch:9},{wch:10},{wch:16},{wch:17},{wch:17},{wch:12},{wch:11}];
+    applyNumberFormat(ws1, [13]);
+
+    // 시트 2: 날짜별 매출 합계 (기록 있는 날만)
+    const summary=[['날짜','요일','건수','캐리어(개)','기타 짐(개)','매출(원)']];
+    byDay.filter(x=>x.list.length).forEach(({date, list})=>{
+      summary.push([
+        date, WEEKDAYS[new Date(date+'T00:00:00').getDay()], list.length,
+        list.reduce((s,t)=>s+(t.carrierCount||0),0),
+        list.reduce((s,t)=>s+(t.otherCount||0),0),
+        list.reduce((s,t)=>s+(t.price||0),0)
+      ]);
+    });
+    summary.push([]);
+    summary.push(['합계','',totalCount,sumC,sumO,sumP]);
+    const ws2=XLSX.utils.aoa_to_sheet(summary);
+    ws2['!cols']=[{wch:11},{wch:5},{wch:7},{wch:10},{wch:10},{wch:12}];
+    applyNumberFormat(ws2, [5]);
+
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws1, '완료 내역');
+    XLSX.utils.book_append_sheet(wb, ws2, '날짜별 매출');
+    const fname='LIN_records_'+from+(from!==to? '~'+to : '')+'.xlsx';
+    const data=XLSX.write(wb, {bookType:'xlsx', type:'array'});
+    const blob=new Blob([data], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url; a.download=fname;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 10000);
+  }catch(e){
+    alert('엑셀 만들기에 실패했습니다: '+(e.message||e));
+  }finally{
+    btn.disabled=false; btn.textContent='엑셀 다운로드';
   }
 });
 
